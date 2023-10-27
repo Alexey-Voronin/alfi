@@ -45,7 +45,7 @@ class NavierStokesSolver(object):
 
     def residual(self):
         raise NotImplementedError
-    
+
     def update_wind(self, z):
         raise NotImplementedError
 
@@ -74,6 +74,7 @@ class NavierStokesSolver(object):
 
         self.problem = problem
         self.nref = nref
+        self.k = k
         self.solver_type = solver_type
         self.stabilisation_type = stabilisation_type
         self.patch = patch
@@ -115,7 +116,8 @@ class NavierStokesSolver(object):
         self.parallel = mh[0].comm.size > 1
         self.tdim = mh[0].topological_dimension()
         self.mh = mh
-        self.area = assemble(Constant(1, domain=mh[0])*dx)
+
+
         nu = Constant(1.0)
         self.nu = nu
         self.char_L = problem.char_length()
@@ -132,11 +134,20 @@ class NavierStokesSolver(object):
 
         mesh = mh[-1]
         uviss = []
- 
+
         self.mesh = mesh
         self.load_balance(mesh)
         Z = self.function_space(mesh, k)
         self.Z = Z
+
+
+        ztmp = Function(Z, name="tmp")
+        (_, p) = ztmp.subfunctions
+        p.assign(1)
+        self.area = assemble(p*dx)
+        #self.area = assemble(Constant(1, domain=mh[0])*dx)
+
+
         comm = mesh.mpi_comm()
         if False:#comm.size == 1:
             visbase = firedrake.Mesh(mesh._topology_dm.clone(), dim=mesh.ufl_cell().geometric_dimension(),
@@ -165,14 +176,14 @@ class NavierStokesSolver(object):
 
         Zdim = self.Z.dim()
         size = comm.size
-        if comm.rank == 0:
-            print("Number of degrees of freedom: %s (avg %.2f per core)" % (Zdim, Zdim / size))
+        #if comm.rank == 0:
+        #    print("Number of degrees of freedom: %s (avg %.2f per core)" % (Zdim, Zdim / size))
         Vdim = self.Z.sub(0).dim()
-        if comm.rank == 0:
-            print("Number of velocity degrees of freedom: %s (avg %.2f per core)" % (Vdim, Vdim / size))
+        #if comm.rank == 0:
+        #    print("Number of velocity degrees of freedom: %s (avg %.2f per core)" % (Vdim, Vdim / size))
         z = Function(Z, name="Solution")
-        z.split()[0].rename("Velocity")
-        z.split()[1].rename("Pressure")
+        z.subfunctions[0].rename("Velocity")
+        z.subfunctions[1].rename("Pressure")
         self.z = z
         (u, p) = split(z)
         (v, q) = split(TestFunction(Z))
@@ -191,9 +202,10 @@ class NavierStokesSolver(object):
         else:
             self.nsp = nsp
 
+
         params = self.get_parameters()
         if mesh.mpi_comm().rank == 0:
-            pprint.pprint(params)
+            #pprint.pprint(params)
             sys.stdout.flush()
 
         self.z_last = z.copy(deepcopy=True)
@@ -249,36 +261,39 @@ class NavierStokesSolver(object):
         self.solver.set_transfer_manager(self.transfermanager)
         self.check_nograddiv_residual = True
         if self.check_nograddiv_residual:
-            self.message(GREEN % "Checking residual without grad-div term")
+            #self.message(GREEN % "Checking residual without grad-div term")
             self.F_nograddiv = replace(F, {gamma: 0})
             self.F = F
             self.bcs = bcs
 
-    def solve(self, re):
+    def solve(self, re, plot=False):
         self.z_last.assign(self.z)
-        self.message(GREEN % ("Solving for Re = %s" % re))
+        #self.message(GREEN % ("Solving for Re = %s" % re))
 
         if re == 0:
-            self.message(GREEN % ("Solving Stokes"))
+            #self.message(GREEN % ("Solving Stokes"))
             self.advect.assign(0)
             self.nu.assign(self.char_L*self.char_U)
         else:
             self.advect.assign(1)
             self.nu.assign(self.char_L*self.char_U/re)
-        # self.gamma.assign(1+re)
 
         if self.stabilisation is not None:
-            self.stabilisation.update(self.z.split()[0])
+            self.stabilisation.update(self.z.subfunctions[0])
+
+        self.solver.snes.ksp.setConvergenceHistory()
         start = datetime.now()
         self.solver.solve()
         end = datetime.now()
+        ksp_history = self.solver.snes.ksp.getConvergenceHistory()
 
         if self.nsp is not None:
             # Hardcode that pressure integral is zero
-            (u, p) = self.z.split()
+            (u, p) = self.z.subfunctions
             pintegral = assemble(p*dx)
             p.assign(p - Constant(pintegral/self.area))
 
+        """
         if self.check_nograddiv_residual:
             F_ngd = assemble(self.F_nograddiv)
             for bc in self.bcs:
@@ -289,10 +304,11 @@ class NavierStokesSolver(object):
             with F_ngd.dat.vec_ro as v_ngd, F.dat.vec_ro as v:
                 self.message(BLUE % ("Residual without grad-div term: %.14e" % v_ngd.norm()))
                 self.message(BLUE % ("Residual with grad-div term:    %.14e" % v.norm()))
+        """
         Re_linear_its = self.solver.snes.getLinearSolveIterations()
         Re_nonlinear_its = self.solver.snes.getIterationNumber()
         Re_time = (end-start).total_seconds() / 60
-        self.message(GREEN % ("Time taken: %.2f min in %d iterations (%.2f Krylov iters per Newton step)" % (Re_time, Re_linear_its, Re_linear_its/max(1, float(Re_nonlinear_its)))))
+        #self.message(GREEN % ("Time taken: %.2f min in %d iterations (%.2f Krylov iters per Newton step)" % (Re_time, Re_linear_its, Re_linear_its/max(1, float(Re_nonlinear_its)))))
         info_dict = {
             "Re": re,
             "nu": self.nu.values()[0],
@@ -300,6 +316,29 @@ class NavierStokesSolver(object):
             "nonlinear_iter": Re_nonlinear_its,
             "time": Re_time,
         }
+
+        ndofs = np.prod(self.z.dat.data[0].shape)+self.z.dat.data[1].shape[0]
+        rresid = ksp_history[-1]/ksp_history[0]
+        print(f'order={self.k:2d} nref={self.nref:2d} | ndofs={ndofs:10d} | rel_resid[{Re_linear_its:2d}]={rresid:1.2e} | solve_time={Re_time:1.3e}')
+
+        if plot:
+            u,p = self.z.subfunctions
+            import matplotlib.pyplot as plt
+            fig, axs = plt.subplots(1, 2, figsize=(8, 4))  # 1 row, 2 columns
+
+            u,p = self.z.subfunctions
+            ubar = tricontourf(u, axes=axs[0])
+            pbar = tricontourf(p, axes=axs[1])
+
+            for ax, contour, ttl in zip(axs,
+                                   [ubar, pbar],
+                                   ['$u$', '$p$']):
+                ax.axis('equal')
+                ax.axis('off')
+            fig.colorbar(contour, ax=ax)
+            plt.show()
+
+
         return (self.z, info_dict)
 
     def get_parameters(self):
@@ -461,21 +500,21 @@ class NavierStokesSolver(object):
         }
 
         outer_base = {
-            "snes_type": "newtonls",
-            "snes_max_it": 20,
+            "snes_type": "ksponly", #"newtonls",
+            "snes_max_it": 1,
             "snes_linesearch_type": "basic",
             "snes_linesearch_maxstep": 1.0,
-            "snes_monitor": None,
-            "snes_linesearch_monitor": None,
-            "snes_converged_reason": None,
+            #"snes_monitor": None,
+            #"snes_linesearch_monitor": None,
+            #"snes_converged_reason": None,
             "ksp_type": "fgmres",
-            "ksp_monitor_true_residual": None,
-            "ksp_converged_reason": None,
+            #"ksp_monitor_true_residual": None,
+            #"ksp_converged_reason": None,
         }
         if self.high_accuracy:
             tolerances = {
-                "ksp_rtol": 1.0e-12,
-                "ksp_atol": 1.0e-12,
+                "ksp_rtol": 1.0e-11,
+                "ksp_atol": 1.0e-15,
                 "snes_rtol": 1.0e-10,
                 "snes_atol": 1.0e-10,
                 "snes_stol": 1.0e-10,
@@ -502,7 +541,7 @@ class NavierStokesSolver(object):
 
         if self.solver_type == "lu":
             outer = {**outer_base, **outer_lu}
-        elif self.solver_type == "simple": 
+        elif self.solver_type == "simple":
             outer = {**outer_base, **outer_simple}
         elif self.solver_type == "lsc":
             outer = {**outer_base, **outer_lsc}
@@ -548,10 +587,12 @@ class NavierStokesSolver(object):
         min_owned_dofs = comm.allreduce(owned_dofs, op=MPI.MIN)
         mean_owned_dofs = np.mean(comm.allgather(owned_dofs))
         max_owned_dofs = comm.allreduce(owned_dofs, op=MPI.MAX)
+        """
         self.message(BLUE % ("Load balance: %i vs %i vs %i (%.3f, %.3f)" % (
             min_owned_dofs, mean_owned_dofs, max_owned_dofs,
             max_owned_dofs/mean_owned_dofs, max_owned_dofs/min_owned_dofs
         )))
+        """
 
 
 class ConstantPressureSolver(NavierStokesSolver):
@@ -613,6 +654,10 @@ class ScottVogeliusSolver(NavierStokesSolver):
     def residual(self):
         u, p = split(self.z)
         v, q = TestFunctions(self.Z)
+        """
+        F    = (inner(grad(u), grad(v)) - p * div(v) - div(u) * q + self.gamma * inner(div(u), div(v))
+                ) * dx
+        """
         F = (
             self.nu * inner(2*sym(grad(u)), grad(v))*dx
             + self.gamma * inner(div(u), div(v))*dx
