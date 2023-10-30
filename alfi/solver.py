@@ -338,7 +338,7 @@ class NavierStokesSolver(object):
 
         ndofs = np.prod(self.z.dat.data[0].shape)+self.z.dat.data[1].shape[0]
         rresid = ksp_history[-1]/ksp_history[0]
-        print(f'order={self.k:2d} nref={self.nref:2d} | ndofs={ndofs:10d} | rel_resid[{Re_linear_its:2d}]={rresid:1.2e} | overall_time(s)={total_time:1.3e} warm_time(s)={Re_time:1.3e}')
+        output_str = f'order={self.k:2d} nref={self.nref:2d} | ndofs={ndofs:8d} | rel_resid[{Re_linear_its:2d}]={rresid:1.2e} | overall_time(s)={total_time:1.3e} warm_time(s)={Re_time:1.3e}'
 
         if plot:
             u,p = self.z.subfunctions
@@ -358,7 +358,7 @@ class NavierStokesSolver(object):
             plt.show()
 
 
-        return (self.z, info_dict)
+        return (self.z, info_dict, output_str)
 
     def get_parameters(self):
         multiplicative = self.patch_composition == "multiplicative"
