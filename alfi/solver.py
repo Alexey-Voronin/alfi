@@ -281,6 +281,10 @@ class NavierStokesSolver(object):
         if self.stabilisation is not None:
             self.stabilisation.update(self.z.subfunctions[0])
 
+        # warm-up solve
+        start_overall = datetime.now()
+        self.solver.solve()
+        
         self.solver.snes.ksp.setConvergenceHistory()
         start = datetime.now()
         self.solver.solve()
@@ -307,7 +311,8 @@ class NavierStokesSolver(object):
         """
         Re_linear_its = self.solver.snes.getLinearSolveIterations()
         Re_nonlinear_its = self.solver.snes.getIterationNumber()
-        Re_time = (end-start).total_seconds() / 60
+        Re_time = (end-start).total_seconds() #/ 60
+        total_time = (end-start_overall).total_seconds() #/ 60
         #self.message(GREEN % ("Time taken: %.2f min in %d iterations (%.2f Krylov iters per Newton step)" % (Re_time, Re_linear_its, Re_linear_its/max(1, float(Re_nonlinear_its)))))
         info_dict = {
             "Re": re,
@@ -319,7 +324,7 @@ class NavierStokesSolver(object):
 
         ndofs = np.prod(self.z.dat.data[0].shape)+self.z.dat.data[1].shape[0]
         rresid = ksp_history[-1]/ksp_history[0]
-        print(f'order={self.k:2d} nref={self.nref:2d} | ndofs={ndofs:10d} | rel_resid[{Re_linear_its:2d}]={rresid:1.2e} | solve_time={Re_time:1.3e}')
+        print(f'order={self.k:2d} nref={self.nref:2d} | ndofs={ndofs:10d} | rel_resid[{Re_linear_its:2d}]={rresid:1.2e} | overall_time(s)={total_time:1.3e} warm_time(s)={Re_time:1.3e}')
 
         if plot:
             u,p = self.z.subfunctions
