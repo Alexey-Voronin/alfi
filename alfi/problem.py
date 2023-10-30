@@ -33,7 +33,7 @@ class NavierStokesProblem(object):
     def nullspace(self, Z):
         if self.has_nullspace():
             MVSB = MixedVectorSpaceBasis
-            return MVSB(Z, [Z.sub(0), VectorSpaceBasis(constant=True)])
+            return MVSB(Z, [Z.sub(0), VectorSpaceBasis(constant=True, comm=Z.comm)])
         else:
             return None
 
