@@ -254,6 +254,7 @@ class NavierStokesSolver(object):
         self.params = params
         self.nsp = nsp
         self.appctx = appctx
+        
         self.solver = NonlinearVariationalSolver(problem, solver_parameters=params,
                                                  nullspace=nsp, options_prefix="ns_",
                                                  appctx=appctx)
@@ -283,11 +284,18 @@ class NavierStokesSolver(object):
 
         # warm-up solve
         start_overall = datetime.now()
-        self.solver.solve()
-        
+        try:
+            self.solver.solve()
+        except:
+            print('warm-up run failed')
+        self.z.assign(0)
+
         self.solver.snes.ksp.setConvergenceHistory()
         start = datetime.now()
-        self.solver.solve()
+        try:
+            self.solver.solve()
+        except:
+            print('warm-up run failed')
         end = datetime.now()
         ksp_history = self.solver.snes.ksp.getConvergenceHistory()
 
@@ -315,11 +323,17 @@ class NavierStokesSolver(object):
         total_time = (end-start_overall).total_seconds() #/ 60
         #self.message(GREEN % ("Time taken: %.2f min in %d iterations (%.2f Krylov iters per Newton step)" % (Re_time, Re_linear_its, Re_linear_its/max(1, float(Re_nonlinear_its)))))
         info_dict = {
-            "Re": re,
-            "nu": self.nu.values()[0],
-            "linear_iter": Re_linear_its,
-            "nonlinear_iter": Re_nonlinear_its,
-            "time": Re_time,
+            "order" : self.k,
+            "ref"   : self.nref,
+            "ncells": self.mesh.num_cells(),
+            "ndofs": np.prod(self.z.subfunctions[0].dat.data.shape)+self.z.subfunctions[1].dat.data.shape[0],
+            "linear_iter"     : Re_linear_its,
+            "overall_time(s)" : total_time,
+            "warm_time(s)"    : Re_time,
+            "Re"              : re,
+            "nu"              : self.nu.values()[0],
+            "resids"          : ksp_history,
+            #"nonlinear_iter"  : Re_nonlinear_its,
         }
 
         ndofs = np.prod(self.z.dat.data[0].shape)+self.z.dat.data[1].shape[0]
