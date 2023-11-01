@@ -357,8 +357,7 @@ class NavierStokesSolver(object):
             fig.colorbar(contour, ax=ax)
             plt.show()
 
-
-        return (self.z, info_dict, output_str)
+        return (info_dict, output_str)
 
     def get_parameters(self):
         multiplicative = self.patch_composition == "multiplicative"
@@ -428,11 +427,14 @@ class NavierStokesSolver(object):
             "mg_coarse_pc_python_type": "firedrake.AssembledPC",
             "mg_coarse_assembled": {
                 "mat_type": "aij",
-                "pc_type": "telescope",
-                "pc_telescope_reduction_factor": telescope_factor,
-                "pc_telescope_subcomm_type": "contiguous",
-                "telescope_pc_type": "lu",
-                "telescope_pc_factor_mat_solver_type": "superlu_dist",
+                
+                "pc_type": "lu",
+                "pc_factor_mat_solver_type": "mumps",
+                #"pc_type": "telescope",
+                #"pc_telescope_reduction_factor": telescope_factor,
+                #"pc_telescope_subcomm_type": "contiguous",
+                #"telescope_pc_type": "lu",
+                #"telescope_pc_factor_mat_solver_type": "superlu_dist",
             }
         }
         fieldsplit_0_amg = {
