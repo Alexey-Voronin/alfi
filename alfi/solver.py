@@ -83,6 +83,7 @@ class NavierStokesSolver(object):
         self.restriction = restriction
         self.smoothing = smoothing
         self.high_accuracy = high_accuracy
+        self._petsc_profiler_dict = []
 
         def rebalance(dm, i):
             if rebalance_vertices:
@@ -266,6 +267,33 @@ class NavierStokesSolver(object):
             self.F_nograddiv = replace(F, {gamma: 0})
             self.F = F
             self.bcs = bcs
+    
+    def _get_petsc_timers(self):
+        """
+        Composed with the help of
+        https://github.com/wence-/composable-solvers/blob/f37763bedf04fb5f6efefb538ebff4b01ec42030/poisson- weak-scale.py#L51
+        and
+        Scott's (e)vent suggestions.
+        """
+
+        solver = self.solver
+        comm   = self.Z.mesh().comm
+
+        timings = {}
+        for e in ["SNESSolve", "KSPSolve",
+                  "PCSetUp", "PCApply",
+                  "ASMPatchPCApply",
+                  #"SNESJacobianEval",
+                  #"ParLoopExecute", #"ParLoopCells",
+                  #"PCPATCHCreate", "PCPATCHComputeOp", "PCPATCHSolve",
+                  #"PCPATCHApply",
+               ]:
+            v = PETSc.Log.Event(e).getPerfInfo()
+            timings[e] = comm.allreduce(v["time"], op=MPI.SUM) / comm.size
+        """
+        """
+
+        return timings
 
     def solve(self, re, plot=False):
         self.z_last.assign(self.z)
@@ -284,18 +312,22 @@ class NavierStokesSolver(object):
 
         # warm-up solve
         start_overall = datetime.now()
-        try:
-            self.solver.solve()
-        except:
-            print('warm-up run failed')
+        with PETSc.Log.Stage(f"Warmup Solve: k={self.k} nref={self.nref}"):
+            try:
+                self.solver.solve()
+                self._petsc_profiler_dict.append(self._get_petsc_timers())
+            except:
+                print('warm-up run failed')
         self.z.assign(0)
 
         self.solver.snes.ksp.setConvergenceHistory()
         start = datetime.now()
-        try:
-            self.solver.solve()
-        except:
-            print('warm-up run failed')
+        with PETSc.Log.Stage(f"Warm Solve: k={self.k} nref={self.nref}"):
+            try:
+                self.solver.solve()
+                self._petsc_profiler_dict.append(self._get_petsc_timers())
+            except:
+                print('warm run failed')
         end = datetime.now()
         ksp_history = self.solver.snes.ksp.getConvergenceHistory()
 
@@ -335,6 +367,8 @@ class NavierStokesSolver(object):
             "resids"          : ksp_history,
             #"nonlinear_iter"  : Re_nonlinear_its,
         }
+        for i, prof_dict in enumerate(self._petsc_profiler_dict):
+            info_dict.update({k + str(i): v for k, v in prof_dict.items()})
 
         ndofs = np.prod(self.z.dat.data[0].shape)+self.z.dat.data[1].shape[0]
         rresid = ksp_history[-1]/ksp_history[0]
