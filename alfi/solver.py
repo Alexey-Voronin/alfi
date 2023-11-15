@@ -52,6 +52,7 @@ class NavierStokesSolver(object):
     def set_transfers(self):
         raise NotImplementedError
 
+    @PETSc.Log.EventDecorator("NavierStokesSolver:init")
     def __init__(self, problem, nref=1, solver_type="almg",
                  stabilisation_type=None,
                  supg_method="shakib", supg_magic=9.0, gamma=10000, nref_vis=1,
@@ -268,7 +269,7 @@ class NavierStokesSolver(object):
             self.F = F
             self.bcs = bcs
     
-    def _get_petsc_timers(self):
+    def _get_petsc_timers(self, solve=True):
         """
         Composed with the help of
         https://github.com/wence-/composable-solvers/blob/f37763bedf04fb5f6efefb538ebff4b01ec42030/poisson- weak-scale.py#L51
@@ -280,22 +281,32 @@ class NavierStokesSolver(object):
         comm   = self.Z.mesh().comm
 
         timings = {}
-        for e in ["SNESSolve", "KSPSolve",
-                  "PCSetUp", "PCApply",
-                  "ASMPatchPCApply",
-                  #"SNESJacobianEval",
-                  #"ParLoopExecute", #"ParLoopCells",
-                  #"PCPATCHCreate", "PCPATCHComputeOp", "PCPATCHSolve",
-                  #"PCPATCHApply",
-               ]:
+
+
+        if solve:
+            events = ["SNESSolve", "KSPSolve",
+                      "PCSetUp", "PCApply",
+                      "ASMPatchPCApply",
+                      #"SNESJacobianEval",
+                      #"ParLoopExecute", #"ParLoopCells",
+                      #"PCPATCHCreate", "PCPATCHComputeOp", "PCPATCHSolve",
+                      #"PCPATCHApply",
+                   ]
+        else:
+            events = ["NavierStokesSolver:init"]
+
+
+        for e in events:
             v = PETSc.Log.Event(e).getPerfInfo()
             timings[e] = comm.allreduce(v["time"], op=MPI.SUM) / comm.size
-        """
-        """
 
         return timings
 
     def solve(self, re, plot=False):
+
+        # stash setup timings
+        setup_times = self._get_petsc_timers(solve=False)
+        
         self.z_last.assign(self.z)
         #self.message(GREEN % ("Solving for Re = %s" % re))
 
@@ -367,6 +378,7 @@ class NavierStokesSolver(object):
             "resids"          : ksp_history,
             #"nonlinear_iter"  : Re_nonlinear_its,
         }
+        info_dict.update(setup_times)
         for i, prof_dict in enumerate(self._petsc_profiler_dict):
             info_dict.update({k + str(i): v for k, v in prof_dict.items()})
 
