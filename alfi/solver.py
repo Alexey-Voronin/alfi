@@ -84,7 +84,7 @@ class StokesSolver(object):
         self.restriction = restriction
         self.smoothing = smoothing
         self.high_accuracy = high_accuracy
-        self._petsc_profiler_dict = []
+        self._petsc_profiler_dict = {}
         self.log_file = "results.log"
 
         def rebalance(dm, i):
@@ -309,7 +309,7 @@ class StokesSolver(object):
             if petsc_prof:
                 with PETSc.Log.Stage(f"{name} Solve: k={self.k} nref={self.nref}"):
                     self.solver.solve()
-                    self._petsc_profiler_dict.append(self._get_petsc_timers())
+                    self._petsc_profiler_dict[name] = self._get_petsc_timers()
             else:
                 self.solver.solve()
         except Exception as e:
@@ -341,7 +341,7 @@ class StokesSolver(object):
         self.z.assign(0)
         # Warm solve
         self.solver.snes.ksp.setConvergenceHistory()
-        t1 = self._solve(name='War Solve', petsc_prof=True)
+        t1 = self._solve(name='Warm', petsc_prof=True)
         ksp_history = self.solver.snes.ksp.getConvergenceHistory()
 
         if self.nsp is not None:
@@ -365,8 +365,8 @@ class StokesSolver(object):
             "resids"          : ksp_history,
         }
         info_dict.update(setup_times)
-        for i, prof_dict in enumerate(self._petsc_profiler_dict):
-            info_dict.update({k + str(i): v for k, v in prof_dict.items()})
+        for name, prof_dict in self._petsc_profiler_dict.items():
+            info_dict.update({f"{k}:{name}": v for k, v in prof_dict.items()})
 
         ndofs = np.prod(self.z.dat.data[0].shape)+self.z.dat.data[1].shape[0]
         rresid = ksp_history[-1]/ksp_history[0]
