@@ -38,7 +38,7 @@ class DGMassInv(PCBase):
         raise NotImplementedError("Sorry!")
 
 
-class NavierStokesSolver(object):
+class StokesSolver(object):
 
     def function_space(self, mesh, k):
         raise NotImplementedError
@@ -52,7 +52,7 @@ class NavierStokesSolver(object):
     def set_transfers(self):
         raise NotImplementedError
 
-    @PETSc.Log.EventDecorator("NavierStokesSolver:init")
+    @PETSc.Log.EventDecorator("StokesSolver:init")
     def __init__(self, problem, nref=1, solver_type="almg",
                  stabilisation_type=None,
                  supg_method="shakib", supg_magic=9.0, gamma=10000, nref_vis=1,
@@ -289,7 +289,7 @@ class NavierStokesSolver(object):
             events = ["SNESSolve", "KSPSolve",
                       "PCSetUp", "PCApply"]
         else:
-            events = ["NavierStokesSolver:init"]
+            events = ["StokesSolver:init"]
 
         perf = dict((e, PETSc.Log.Event(e).getPerfInfo()) for e in events)
         perf_reduced = {}
@@ -654,7 +654,7 @@ class NavierStokesSolver(object):
         """
 
 
-class ConstantPressureSolver(NavierStokesSolver):
+class ConstantPressureSolver(StokesSolver):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -705,7 +705,7 @@ class ConstantPressureSolver(NavierStokesSolver):
         return {"partition": True, "overlap_type": (DistributedMeshOverlapType.VERTEX, 1)}
 
 
-class ScottVogeliusSolver(NavierStokesSolver):
+class ScottVogeliusSolver(StokesSolver):
 
     _name = "Scott Vogelius" 
 

@@ -2,7 +2,7 @@ from firedrake import *
 from alfi.bary import BaryMeshHierarchy, bary
 
 
-class NavierStokesProblem(object):
+class StokesProblem(object):
 
     def mesh(self, distribution_parameters):
         raise NotImplementedError
