@@ -85,6 +85,7 @@ class NavierStokesSolver(object):
         self.smoothing = smoothing
         self.high_accuracy = high_accuracy
         self._petsc_profiler_dict = []
+        self.log_file = "results.log"
 
         def rebalance(dm, i):
             if rebalance_vertices:
@@ -252,11 +253,16 @@ class NavierStokesSolver(object):
 
         appctx = {"nu": self.nu, "gamma": self.gamma}
         problem = NonlinearVariationalProblem(F, z, bcs=bcs)
+        self.message(f"{self._name} Problem has been set up", "sanity_check.log", stdio=False)
         self.bcs = bcs
+        
         self.params = params
         self.nsp = nsp
         self.appctx = appctx
         
+        self.message(f"Setting up the solver..", "sanity_check.log", stdio=False)
+        # dump solver parameters and respective ksp solvers info to a log-file
+        self.message(pprint.pformat(self.params), "sanity_check.log", stdio=False)
         self.solver = NonlinearVariationalSolver(problem, solver_parameters=params,
                                                  nullspace=nsp, options_prefix="ns_",
                                                  appctx=appctx)
@@ -264,7 +270,6 @@ class NavierStokesSolver(object):
         self.solver.set_transfer_manager(self.transfermanager)
         self.check_nograddiv_residual = True
         if self.check_nograddiv_residual:
-            #self.message(GREEN % "Checking residual without grad-div term")
             self.F_nograddiv = replace(F, {gamma: 0})
             self.F = F
             self.bcs = bcs
@@ -280,38 +285,48 @@ class NavierStokesSolver(object):
         solver = self.solver
         comm   = self.Z.mesh().comm
 
-        timings = {}
-
-
         if solve:
             events = ["SNESSolve", "KSPSolve",
-                      "PCSetUp", "PCApply",
-                      "ASMPatchPCApply",
-                      #"SNESJacobianEval",
-                      #"ParLoopExecute", #"ParLoopCells",
-                      #"PCPATCHCreate", "PCPATCHComputeOp", "PCPATCHSolve",
-                      #"PCPATCHApply",
-                   ]
+                      "PCSetUp", "PCApply"]
         else:
             events = ["NavierStokesSolver:init"]
 
+        perf = dict((e, PETSc.Log.Event(e).getPerfInfo()) for e in events)
+        perf_reduced = {}
+        for k, v in perf.items():
+            for kk, vv in v.items():
+                if kk in ['time', 'flops']:
+                    perf_reduced[f"{k}({kk})"] = comm.allreduce(vv, op=MPI.SUM) / comm.size
 
-        for e in events:
-            v = PETSc.Log.Event(e).getPerfInfo()
-            timings[e] = comm.allreduce(v["time"], op=MPI.SUM) / comm.size
+        return perf_reduced
+    
+    def _solve(self, name='', petsc_prof=False):
+        self.z.assign(0)
 
-        return timings
+        MPI.COMM_WORLD.Barrier() # sync before timings
+        start = datetime.now()
+        try:
+            if petsc_prof:
+                with PETSc.Log.Stage(f"{name} Solve: k={self.k} nref={self.nref}"):
+                    self.solver.solve()
+                    self._petsc_profiler_dict.append(self._get_petsc_timers())
+            else:
+                self.solver.solve()
+        except Exception as e:
+            detailed_message = f"{name} solve failed due to: {str(e)}. Please check the input conditions and solver configurations."
+            self.message(detailed_message, self.log_file, stdio=True)
+        stop = datetime.now()
+        MPI.COMM_WORLD.Barrier()
+
+        self.message(f"{name} run complete.", "sanity_check.log", stdio=False)
+        return (stop-start).total_seconds()
 
     def solve(self, re, plot=False):
-
         # stash setup timings
         setup_times = self._get_petsc_timers(solve=False)
         
         self.z_last.assign(self.z)
-        #self.message(GREEN % ("Solving for Re = %s" % re))
-
         if re == 0:
-            #self.message(GREEN % ("Solving Stokes"))
             self.advect.assign(0)
             self.nu.assign(self.char_L*self.char_U)
         else:
@@ -321,25 +336,12 @@ class NavierStokesSolver(object):
         if self.stabilisation is not None:
             self.stabilisation.update(self.z.subfunctions[0])
 
-        # warm-up solve
-        start_overall = datetime.now()
-        with PETSc.Log.Stage(f"Warmup Solve: k={self.k} nref={self.nref}"):
-            try:
-                self.solver.solve()
-                self._petsc_profiler_dict.append(self._get_petsc_timers())
-            except:
-                print('warm-up run failed')
+        # Warm-up solve
+        t0 = self._solve(name='Warmup', petsc_prof=True)
         self.z.assign(0)
-
+        # Warm solve
         self.solver.snes.ksp.setConvergenceHistory()
-        start = datetime.now()
-        with PETSc.Log.Stage(f"Warm Solve: k={self.k} nref={self.nref}"):
-            try:
-                self.solver.solve()
-                self._petsc_profiler_dict.append(self._get_petsc_timers())
-            except:
-                print('warm run failed')
-        end = datetime.now()
+        t1 = self._solve(name='War Solve', petsc_prof=True)
         ksp_history = self.solver.snes.ksp.getConvergenceHistory()
 
         if self.nsp is not None:
@@ -348,35 +350,19 @@ class NavierStokesSolver(object):
             pintegral = assemble(p*dx)
             p.assign(p - Constant(pintegral/self.area))
 
-        """
-        if self.check_nograddiv_residual:
-            F_ngd = assemble(self.F_nograddiv)
-            for bc in self.bcs:
-                bc.zero(F_ngd)
-            F = assemble(self.F)
-            for bc in self.bcs:
-                bc.zero(F)
-            with F_ngd.dat.vec_ro as v_ngd, F.dat.vec_ro as v:
-                self.message(BLUE % ("Residual without grad-div term: %.14e" % v_ngd.norm()))
-                self.message(BLUE % ("Residual with grad-div term:    %.14e" % v.norm()))
-        """
         Re_linear_its = self.solver.snes.getLinearSolveIterations()
         Re_nonlinear_its = self.solver.snes.getIterationNumber()
-        Re_time = (end-start).total_seconds() #/ 60
-        total_time = (end-start_overall).total_seconds() #/ 60
-        #self.message(GREEN % ("Time taken: %.2f min in %d iterations (%.2f Krylov iters per Newton step)" % (Re_time, Re_linear_its, Re_linear_its/max(1, float(Re_nonlinear_its)))))
         info_dict = {
             "order" : self.k,
             "ref"   : self.nref,
             "ncells": self.mesh.num_cells(),
             "ndofs": np.prod(self.z.subfunctions[0].dat.data.shape)+self.z.subfunctions[1].dat.data.shape[0],
             "linear_iter"     : Re_linear_its,
-            "overall_time(s)" : total_time,
-            "warm_time(s)"    : Re_time,
+            "overall_time(s)" : t0+t1,
+            "warm_time(s)"    : t1,
             "Re"              : re,
             "nu"              : self.nu.values()[0],
             "resids"          : ksp_history,
-            #"nonlinear_iter"  : Re_nonlinear_its,
         }
         info_dict.update(setup_times)
         for i, prof_dict in enumerate(self._petsc_profiler_dict):
@@ -384,26 +370,28 @@ class NavierStokesSolver(object):
 
         ndofs = np.prod(self.z.dat.data[0].shape)+self.z.dat.data[1].shape[0]
         rresid = ksp_history[-1]/ksp_history[0]
-        output_str = f'order={self.k:2d} nref={self.nref:2d} | ndofs={ndofs:8d} | rel_resid[{Re_linear_its:2d}]={rresid:1.2e} | overall_time(s)={total_time:1.3e} warm_time(s)={Re_time:1.3e}'
+        msg = f'order={self.k:2d} nref={self.nref:2d} | ndofs={ndofs:8d} | rel_resid[{Re_linear_its:2d}]={rresid:1.2e} | overall_time(s)={t0+t1:1.3e} warm_time(s)={t1:1.3e}'
+        self.message(msg, self.log_file, stdio=True)
+        self.message(msg, "sanity_check.log", stdio=False)
 
-        if plot:
-            u,p = self.z.subfunctions
-            import matplotlib.pyplot as plt
-            fig, axs = plt.subplots(1, 2, figsize=(8, 4))  # 1 row, 2 columns
+        return info_dict
 
-            u,p = self.z.subfunctions
-            ubar = tricontourf(u, axes=axs[0])
-            pbar = tricontourf(p, axes=axs[1])
+    def plot(self):
+        u,p = self.z.subfunctions
+        import matplotlib.pyplot as plt
+        fig, axs = plt.subplots(1, 2, figsize=(8, 4))  # 1 row, 2 columns
 
-            for ax, contour, ttl in zip(axs,
-                                   [ubar, pbar],
-                                   ['$u$', '$p$']):
-                ax.axis('equal')
-                ax.axis('off')
-            fig.colorbar(contour, ax=ax)
-            plt.show()
+        u,p = self.z.subfunctions
+        ubar = tricontourf(u, axes=axs[0])
+        pbar = tricontourf(p, axes=axs[1])
 
-        return (info_dict, output_str)
+        for ax, contour, ttl in zip(axs,
+                               [ubar, pbar],
+                               ['$u$', '$p$']):
+            ax.axis('equal')
+            ax.axis('off')
+        fig.colorbar(contour, ax=ax)
+        plt.show()
 
     def get_parameters(self):
         multiplicative = self.patch_composition == "multiplicative"
@@ -619,9 +607,13 @@ class NavierStokesSolver(object):
 
         return outer
 
-    def message(self, msg):
-        if self.mesh.comm.rank == 0:
-            warning(msg)
+    def message(self, msg, file_name, stdio=True):
+        if MPI.COMM_WORLD.Get_rank() == 0:
+            if stdio:
+                print(msg)
+            if file_name is not None:
+                with open(file_name, 'a') as file:
+                    file.write(msg+"\n")
 
     def setup_adjoint(self, J):
         F = self.F
@@ -714,6 +706,8 @@ class ConstantPressureSolver(NavierStokesSolver):
 
 
 class ScottVogeliusSolver(NavierStokesSolver):
+
+    _name = "Scott Vogelius" 
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
