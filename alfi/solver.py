@@ -121,6 +121,11 @@ class StokesSolver(object):
         self.mh = mh
 
 
+        #from firedrake.pyplot import triplot
+        #import matplotlib.pyplot as plt
+        #for m in self.mh:
+        #    triplot(m); plt.show()
+
         nu = Constant(1.0)
         self.nu = nu
         self.char_L = problem.char_length()
@@ -255,11 +260,11 @@ class StokesSolver(object):
         problem = NonlinearVariationalProblem(F, z, bcs=bcs)
         self.message(f"{self._name} Problem has been set up", "sanity_check.log", stdio=False)
         self.bcs = bcs
-        
+
         self.params = params
         self.nsp = nsp
         self.appctx = appctx
-        
+
         self.message(f"Setting up the solver..", "sanity_check.log", stdio=False)
         # dump solver parameters and respective ksp solvers info to a log-file
         self.message(pprint.pformat(self.params), "sanity_check.log", stdio=False)
@@ -273,7 +278,7 @@ class StokesSolver(object):
             self.F_nograddiv = replace(F, {gamma: 0})
             self.F = F
             self.bcs = bcs
-    
+
     def _get_petsc_timers(self, solve=True):
         """
         Composed with the help of
@@ -299,7 +304,7 @@ class StokesSolver(object):
                     perf_reduced[f"{k}({kk})"] = comm.allreduce(vv, op=MPI.SUM) / comm.size
 
         return perf_reduced
-    
+
     def _solve(self, name='', petsc_prof=False):
         self.z.assign(0)
 
@@ -324,7 +329,7 @@ class StokesSolver(object):
     def solve(self, re, plot=False):
         # stash setup timings
         setup_times = self._get_petsc_timers(solve=False)
-        
+
         self.z_last.assign(self.z)
         if re == 0:
             self.advect.assign(0)
@@ -463,7 +468,7 @@ class StokesSolver(object):
             "mg_coarse_pc_python_type": "firedrake.AssembledPC",
             "mg_coarse_assembled": {
                 "mat_type": "aij",
-                
+
                 "pc_type": "lu",
                 "pc_factor_mat_solver_type": "mumps",
                 #"pc_type": "telescope",
@@ -710,7 +715,7 @@ class ConstantPressureSolver(StokesSolver):
 
 class ScottVogeliusSolver(StokesSolver):
 
-    _name = "Scott Vogelius" 
+    _name = "Scott Vogelius"
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
