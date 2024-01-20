@@ -565,6 +565,7 @@ class StokesSolver(object):
             #"snes_linesearch_monitor": None,
             #"snes_converged_reason": None,
             "ksp_type": "fgmres",
+            "ksp_max_it" : 100,
             #"ksp_monitor_true_residual": None,
             #"ksp_converged_reason": None,
         }
