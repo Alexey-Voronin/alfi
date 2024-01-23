@@ -409,7 +409,9 @@ class StokesSolver(object):
 
 
         mg_levels_solver = {
-            "ksp_type": "fgmres",
+            #"ksp_type": "fgmres",
+            "ksp_type": "chebyshev",
+            "ksp_chebyshev_esteig": "0,0.25,0,1.1",
             "ksp_norm_type": "unpreconditioned",
             "ksp_max_it": self.smoothing,
             "ksp_convergence_test": "skip",
@@ -461,7 +463,9 @@ class StokesSolver(object):
             "ksp_norm_type": "unpreconditioned",
             "ksp_convergence_test": "skip",
             "pc_type": "mg",
-            "pc_mg_type": "full",
+            #"pc_mg_type": "full",
+            "pc_mg_type": "multiplicative",
+            "pc_cycle_type" : "V",
             "pc_mg_log": None,
             "mg_levels": mg_levels_solver,
             "mg_coarse_pc_type": "python",
