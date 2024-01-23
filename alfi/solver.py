@@ -357,13 +357,14 @@ class StokesSolver(object):
 
         Re_linear_its = self.solver.snes.getLinearSolveIterations()
         Re_nonlinear_its = self.solver.snes.getIterationNumber()
+        ndofs = self.Z.sub(0).dim()+self.Z.sub(1).dim()
         info_dict = {
             "order" : self.k,
             "ref"   : self.nref,
             "ncells": self.mesh.num_cells(),
             "udofs" : self.Z.sub(0).dim(),
             "pdofs" : self.Z.sub(1).dim(),
-            "ndofs" : self.Z.sub(0).dim()+self.Z.sub(1).dim(),
+            "ndofs" : ndofs,
             "linear_iter"     : Re_linear_its,
             "overall_time(s)" : t0+t1,
             "warm_time(s)"    : t1,
@@ -375,7 +376,6 @@ class StokesSolver(object):
         for name, prof_dict in self._petsc_profiler_dict.items():
             info_dict.update({f"{k}:{name}": v for k, v in prof_dict.items()})
 
-        ndofs = np.prod(self.z.dat.data[0].shape)+self.z.dat.data[1].shape[0]
         rresid = ksp_history[-1]/ksp_history[0]
         msg = f'order={self.k:2d} nref={self.nref:2d} | ndofs={ndofs:8d} | rel_resid[{Re_linear_its:2d}]={rresid:1.2e} | overall_time(s)={t0+t1:1.3e} warm_time(s)={t1:1.3e}'
         self.message(msg, self.log_file, stdio=True)
