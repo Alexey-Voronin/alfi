@@ -482,6 +482,7 @@ class StokesSolver(object):
                 #"telescope_pc_factor_mat_solver_type": "superlu_dist",
             }
         }
+        import phmg
         fieldsplit_0_pmg = {
             "ksp_type": "richardson",
             "ksp_richardson_self_scale": False,
@@ -490,7 +491,7 @@ class StokesSolver(object):
             "ksp_convergence_test": "skip",
 
             "pc_type": "python",
-            "pc_python_type": "firedrake.P1PC",
+            "pc_python_type": "phmg.Gradual_Coarsening_Pk", # "firedrake.P1PC",
             "pmg_mg_levels": mg_levels_solver,
             "pmg_mg_coarse": {
                 "degree" : 2,
