@@ -493,6 +493,7 @@ class StokesSolver(object):
             "pc_python_type": "firedrake.P1PC",
             "pmg_mg_levels": mg_levels_solver,
             "pmg_mg_coarse": {
+                "degree" : 2,
                 "pc_type": "mg",
                 #"pc_mg_type": "full",
                 "pc_mg_type": "multiplicative",
@@ -549,7 +550,7 @@ class StokesSolver(object):
             "fieldsplit_0": {
                 "allu": fieldsplit_0_lu,
                 "almg": fieldsplit_0_mg,
-                "alpmg": fieldsplit_0_pmg,
+                "alpmg": fieldsplit_0_pmg if self.k > 2 else fieldsplit_0_mg,
                 "alamg": fieldsplit_0_amg,
                 "lu": None,
                 "simple": None,
