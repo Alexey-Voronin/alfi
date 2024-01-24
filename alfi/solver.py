@@ -63,7 +63,7 @@ class StokesSolver(object):
                  high_accuracy=False
                  ):
 
-        assert solver_type in {"almg", "allu", "lu", "simple", "lsc"}, "Invalid solver type %s" % solver_type
+        assert solver_type in {"almg", "alpmg", "allu", "lu", "simple", "lsc"}, "Invalid solver type %s" % solver_type
         if stabilisation_type == "none":
             stabilisation_type = None
         assert stabilisation_type in {None, "gls", "supg", "burman"}, "Invalid stabilisation type %s" % stabilisation_type
@@ -482,6 +482,37 @@ class StokesSolver(object):
                 #"telescope_pc_factor_mat_solver_type": "superlu_dist",
             }
         }
+        fieldsplit_0_pmg = {
+            "ksp_type": "richardson",
+            "ksp_richardson_self_scale": False,
+            "ksp_max_it": 1,
+            "ksp_norm_type": "unpreconditioned",
+            "ksp_convergence_test": "skip",
+
+            "pc_type": "python",
+            "pc_python_type": "firedrake.P1PC",
+            "pmg_mg_levels": mg_levels_solver,
+            "pmg_mg_coarse": {
+                "pc_type": "mg",
+                #"pc_mg_type": "full",
+                "pc_mg_type": "multiplicative",
+                "pc_cycle_type" : "V",
+                "pc_mg_log": None,
+                "mg_levels": mg_levels_solver,
+                "mg_coarse_pc_type": "python",
+                "mg_coarse_pc_python_type": "firedrake.AssembledPC",
+                "mg_coarse_assembled": {
+                    "mat_type": "aij",
+                    "pc_type": "lu",
+                    "pc_factor_mat_solver_type": "mumps",
+                    #"pc_type": "telescope",
+                    #"pc_telescope_reduction_factor": telescope_factor,
+                    #"pc_telescope_subcomm_type": "contiguous",
+                    #"telescope_pc_type": "lu",
+                    #"telescope_pc_factor_mat_solver_type": "superlu_dist",
+                }
+           }
+        }
         fieldsplit_0_amg = {
             "ksp_type": "richardson",
             "ksp_max_it": 2,
@@ -494,7 +525,7 @@ class StokesSolver(object):
             "pc_python_type": "alfi.solver.DGMassInv"
         }
 
-        use_mg = self.solver_type == "almg"
+        use_mg = self.solver_type in ["almg", "alpmg"]
 
         outer_lu = {
             "mat_type": "aij",
@@ -518,6 +549,7 @@ class StokesSolver(object):
             "fieldsplit_0": {
                 "allu": fieldsplit_0_lu,
                 "almg": fieldsplit_0_mg,
+                "alpmg": fieldsplit_0_pmg,
                 "alamg": fieldsplit_0_amg,
                 "lu": None,
                 "simple": None,
